@@ -216,10 +216,11 @@ footer .tunduk .core{fill:var(--gold-light)}
 <!-- slow-breathing wallpaper of the ornament across the whole page -->
 <div class="orn-field" id="ornField" aria-hidden="true"></div>
 
-<button class="music" id="musicBtn" aria-label="Күүнү күйгүзүү">
+<button class="music playing" id="musicBtn" aria-label="Күүнү токтотуу/күйгүзүү">
   <span class="ring"></span>
-  <svg id="musicIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>
+  <svg id="musicIcon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 4h3v16H6zM15 4h3v16h-3z"/></svg>
 </button>
+<audio id="music" src="music.mp3" preload="auto" loop></audio>
 
 <!-- ================= HERO ================= -->
 <section class="hero felt">
@@ -386,92 +387,44 @@ const io = new IntersectionObserver((entries)=>{
 },{threshold:.2});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 
-/* ---------- generative komuz-style Kyrgyz folk music (no external file needed) ---------- */
-/* Komuz: 3-string plucked lute. Two lower strings hold a droning open interval
-   while the top string carries a fast repeating melodic "kuu" pattern. */
-let ctx, master, droneGain1, droneGain2, playing = false, seqTimer, step = 0;
-
-// A natural-minor / Aeolian family, close to common komuz kuu tunings
-const A2 = 110.00, E3 = 164.81; // drone strings (root + fifth, classic komuz open tuning)
-const melody = [
-  440.00, 392.00, 349.23, 392.00,   // A4 G4 F4 G4
-  440.00, 493.88, 440.00, 392.00,   // A4 B4 A4 G4
-  349.23, 392.00, 440.00, 349.23,   // F4 G4 A4 F4
-  329.63, 349.23, 392.00, 440.00    // E4 F4 G4 A4
-];
-const STEP_DUR = 0.185; // ~fast komuz strum tempo
-
+/* ---------- background music: real track, always on, loops forever ---------- */
+const music = document.getElementById('music');
 const btn = document.getElementById('musicBtn');
 const icon = document.getElementById('musicIcon');
+music.loop = true;
+music.volume = 0.55;
 
-function initAudio(){
-  ctx = new (window.AudioContext||window.webkitAudioContext)();
-  master = ctx.createGain();
-  master.gain.value = 0.0001;
-  master.connect(ctx.destination);
-
-  // two droning open strings, string-like timbre via filtered sawtooth
-  const drone1 = ctx.createOscillator();
-  drone1.type = 'sawtooth'; drone1.frequency.value = A2;
-  const filter1 = ctx.createBiquadFilter(); filter1.type='lowpass'; filter1.frequency.value = 500;
-  droneGain1 = ctx.createGain(); droneGain1.gain.value = 0.05;
-  drone1.connect(filter1); filter1.connect(droneGain1); droneGain1.connect(master);
-  drone1.start();
-
-  const drone2 = ctx.createOscillator();
-  drone2.type = 'sawtooth'; drone2.frequency.value = E3;
-  const filter2 = ctx.createBiquadFilter(); filter2.type='lowpass'; filter2.frequency.value = 700;
-  droneGain2 = ctx.createGain(); droneGain2.gain.value = 0.035;
-  drone2.connect(filter2); filter2.connect(droneGain2); droneGain2.connect(master);
-  drone2.start();
+function setPlayingUI(isPlaying){
+  btn.classList.toggle('playing', isPlaying);
+  icon.innerHTML = isPlaying
+    ? '<path d="M6 4h3v16H6zM15 4h3v16h-3z"/>'
+    : '<path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>';
 }
 
-function pluck(freq, time, dur, vol){
-  const osc = ctx.createOscillator();
-  osc.type = 'triangle';
-  osc.frequency.value = freq;
-  const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 180;
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0, time);
-  g.gain.linearRampToValueAtTime(vol, time + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-  osc.connect(hp); hp.connect(g); g.connect(master);
-  osc.start(time); osc.stop(time + dur + 0.03);
-}
-
-function scheduleLoop(){
-  if(!playing) return;
-  const now = ctx.currentTime;
-  const batch = 8;
-  for(let i=0;i<batch;i++){
-    const idx = (step + i) % melody.length;
-    const freq = melody[idx];
-    // light swing/ornament: occasional grace-note flick up a fourth before the beat
-    if(idx % 4 === 0 && Math.random() < 0.4){
-      pluck(freq * 1.335, now + i*STEP_DUR, STEP_DUR*0.5, 0.045);
-    }
-    pluck(freq, now + i*STEP_DUR + 0.015, STEP_DUR*1.7, 0.07);
+function tryAutoplay(){
+  const p = music.play();
+  if(p !== undefined){
+    p.then(()=>setPlayingUI(true)).catch(()=>{
+      // autoplay blocked by browser — start on first tap/click anywhere
+      setPlayingUI(false);
+      const startOnce = ()=>{
+        music.play().then(()=>setPlayingUI(true)).catch(()=>{});
+        document.removeEventListener('click', startOnce);
+        document.removeEventListener('touchstart', startOnce);
+      };
+      document.addEventListener('click', startOnce, {once:true});
+      document.addEventListener('touchstart', startOnce, {once:true});
+    });
   }
-  step = (step + batch) % melody.length;
-  seqTimer = setTimeout(scheduleLoop, batch*STEP_DUR*1000);
 }
+tryAutoplay();
 
 btn.addEventListener('click', ()=>{
-  if(!ctx) initAudio();
-  if(!playing){
-    ctx.resume();
-    playing = true;
-    master.gain.linearRampToValueAtTime(1, ctx.currentTime + 1.2);
-    step = 0;
-    scheduleLoop();
-    btn.classList.add('playing');
-    icon.innerHTML = '<path d="M6 4h3v16H6zM15 4h3v16h-3z"/>';
+  if(music.paused){
+    music.play().then(()=>setPlayingUI(true)).catch(()=>{});
   } else {
-    playing = false;
-    master.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.8);
-    clearTimeout(seqTimer);
-    btn.classList.remove('playing');
-    icon.innerHTML = '<path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>';
+    music.pause();
+    setPlayingUI(false);
   }
 });
 </script>
